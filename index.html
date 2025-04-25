@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>Game of Life</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <style>
+        /* Основные стили */
+        body {
+            background-color: #212121;
+            color: #ff9800;
+            font-family: Arial, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            margin: 0;
+            min-height: 100vh;
+            padding: 10px;
+            box-sizing: border-box;
+        }
+
+        h1 {
+            margin: 15px 0;
+            font-size: 2em;
+            text-align: center;
+        }
+
+        canvas {
+            border: 2px solid #ff9800;
+            border-radius: 4px;
+            background-color: #333;
+            width: 100%;
+            max-width: 800px;
+            max-height: 70vh;
+            touch-action: none;
+        }
+
+        .controls {
+            margin: 15px 0;
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            flex-wrap: wrap;
+            justify-content: center;
+            width: 100%;
+            max-width: 800px;
+        }
+
+        button {
+            padding: 12px 24px;
+            background-color: #ff9800;
+            border: none;
+            border-radius: 25px;
+            color: #212121;
+            cursor: pointer;
+            transition: all 0.3s;
+            font-size: 1em;
+            min-width: 80px;
+        }
+
+        button:hover {
+            opacity: 0.8;
+            transform: scale(1.05);
+        }
+
+        .speed-control {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            background: #333;
+            padding: 8px 15px;
+            border-radius: 25px;
+            width: 100%;
+            max-width: 300px;
+        }
+
+        input[type="range"] {
+            flex: 1;
+            accent-color: #ff9800;
+            min-width: 120px;
+        }
+
+        /* Адаптивные стили */
+        @media (max-width: 600px) {
+            h1 {
+                font-size: 1.5em;
+            }
+
+            button {
+                padding: 10px 20px;
+                font-size: 0.9em;
+            }
+
+            canvas {
+                max-height: 60vh;
+            }
+
+            .speed-control {
+                font-size: 0.9em;
+                padding: 6px 12px;
+            }
+        }
+
+        @media (max-width: 400px) {
+            .controls {
+                gap: 8px;
+            }
+
+            button {
+                min-width: 70px;
+                padding: 8px 16px;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <h1>Game of Life</h1>
+    <div class="controls">
+        <button id="start">Start</button>
+        <button id="stop">Stop</button>
+        <button id="random">Random</button>
+        <button id="clear">Clear</button>
+        <div class="speed-control">
+            <span>Speed:</span>
+            <input type="range" id="speed" min="50" max="1000" value="100">
+            <span id="speed-value">100 ms</span>
+        </div>
+    </div>
+    <canvas id="gameCanvas"></canvas>
+
+    <script>
+        class GameOfLife {
+            constructor() {
+                this.canvas = document.getElementById('gameCanvas');
+                this.ctx = this.canvas.getContext('2d');
+                this.running = false;
+                this.interval = 100;
+                this.baseCellSize = 20;
+                this.resizeTimeout = null;
+
+                // Инициализация размеров
+                this.initCanvasSize();
+                this.initGrid();
+                this.setupEventListeners();
+                this.draw();
+
+                // Обработчик изменения размера окна
+                window.addEventListener('resize', () => {
+                    clearTimeout(this.resizeTimeout);
+                    this.resizeTimeout = setTimeout(() => this.handleResize(), 200);
+                });
+            }
+
+            initCanvasSize() {
+                // Рассчет размеров холста
+                const maxWidth = Math.min(800, window.innerWidth - 40);
+                const maxHeight = Math.min(window.innerHeight * 0.7, 600);
+
+                this.canvas.width = maxWidth;
+                this.canvas.height = maxHeight;
+                this.cellSize = this.calculateCellSize();
+
+                // Рассчет сетки
+                this.cols = Math.floor(this.canvas.width / this.cellSize);
+                this.rows = Math.floor(this.canvas.height / this.cellSize);
+            }
+
+            calculateCellSize() {
+                // Адаптивный размер клеток
+                const screenSize = Math.min(window.innerWidth, window.innerHeight);
+                return Math.max(15, Math.min(this.baseCellSize, screenSize / 25));
+            }
+
+            handleResize() {
+                // Обновление при изменении размера
+                this.initCanvasSize();
+                this.initGrid();
+                this.draw();
+            }
+
+            initGrid() {
+                // Перенос состояния в новую сетку
+                const newGrid = this.createEmptyGrid();
+                const oldGrid = this.grid || [];
+
+                for (let row = 0; row < Math.min(this.rows, oldGrid.length); row++) {
+                    for (let col = 0; col < Math.min(this.cols, oldGrid[row]?.length || 0); col++) {
+                        newGrid[row][col] = oldGrid[row][col];
+                    }
+                }
+
+                this.grid = newGrid;
+                this.nextGrid = this.createEmptyGrid();
+            }
+
+            createEmptyGrid() {
+                return Array(this.rows).fill().map(() => Array(this.cols).fill(0));
+            }
+
+            setupEventListeners() {
+                // Обработчики событий
+                this.canvas.addEventListener('click', (e) => this.toggleCell(e));
+                this.canvas.addEventListener('touchstart', (e) => {
+                    e.preventDefault();
+                    this.toggleCell(e.touches[0]);
+                });
+
+                document.getElementById('start').addEventListener('click', () => this.start());
+                document.getElementById('stop').addEventListener('click', () => this.stop());
+                document.getElementById('random').addEventListener('click', () => this.randomize());
+                document.getElementById('clear').addEventListener('click', () => this.clear());
+
+                document.getElementById('speed').addEventListener('input', (e) => {
+                    this.interval = 1000 - e.target.valueAsNumber;
+                    document.getElementById('speed-value').textContent =
+                        `${this.interval} ms`;
+                });
+            }
+
+            toggleCell(e) {
+                // Корректное определение координат для тач-устройств
+                const rect = this.canvas.getBoundingClientRect();
+                const scaleX = this.canvas.width / rect.width;
+                const scaleY = this.canvas.height / rect.height;
+
+                const x = (e.clientX - rect.left) * scaleX;
+                const y = (e.clientY - rect.top) * scaleY;
+
+                const col = Math.floor(x / this.cellSize);
+                const row = Math.floor(y / this.cellSize);
+
+                if (row >= 0 && row < this.rows && col >= 0 && col < this.cols) {
+                    this.grid[row][col] = this.grid[row][col] ? 0 : 1;
+                    this.draw();
+                }
+            }
+
+            countNeighbors(row, col) {
+                let count = 0;
+                for (let i = -1; i <= 1; i++) {
+                    for (let j = -1; j <= 1; j++) {
+                        if (i === 0 && j === 0) continue;
+                        const newRow = row + i;
+                        const newCol = col + j;
+                        if (newRow >= 0 && newRow < this.rows &&
+                            newCol >= 0 && newCol < this.cols) {
+                            count += this.grid[newRow][newCol];
+                        }
+                    }
+                }
+                return count;
+            }
+
+            updateGrid() {
+                this.nextGrid = this.createEmptyGrid();
+
+                for (let row = 0; row < this.rows; row++) {
+                    for (let col = 0; col < this.cols; col++) {
+                        const neighbors = this.countNeighbors(row, col);
+                        const current = this.grid[row][col];
+
+                        if (current === 1 && (neighbors < 2 || neighbors > 3)) {
+                            this.nextGrid[row][col] = 0;
+                        } else if (current === 0 && neighbors === 3) {
+                            this.nextGrid[row][col] = 1;
+                        } else {
+                            this.nextGrid[row][col] = current;
+                        }
+                    }
+                }
+
+                [this.grid, this.nextGrid] = [this.nextGrid, this.grid];
+            }
+
+            draw() {
+                this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+
+                // Рисование клеток
+                this.ctx.fillStyle = '#ff9800';
+                for (let row = 0; row < this.rows; row++) {
+                    for (let col = 0; col < this.cols; col++) {
+                        if (this.grid[row][col]) {
+                            this.ctx.fillRect(
+                                col * this.cellSize,
+                                row * this.cellSize,
+                                this.cellSize - 1,
+                                this.cellSize - 1
+                            );
+                        }
+                    }
+                }
+
+                // Рисование сетки
+                this.ctx.strokeStyle = '#ff980055';
+                for (let row = 0; row <= this.rows; row++) {
+                    this.ctx.beginPath();
+                    this.ctx.moveTo(0, row * this.cellSize);
+                    this.ctx.lineTo(this.canvas.width, row * this.cellSize);
+                    this.ctx.stroke();
+                }
+                for (let col = 0; col <= this.cols; col++) {
+                    this.ctx.beginPath();
+                    this.ctx.moveTo(col * this.cellSize, 0);
+                    this.ctx.lineTo(col * this.cellSize, this.canvas.height);
+                    this.ctx.stroke();
+                }
+            }
+
+            randomize() {
+                this.grid = this.grid.map(row =>
+                    row.map(() => Math.random() > 0.85 ? 1 : 0)
+                );
+                this.draw();
+            }
+
+            clear() {
+                this.grid = this.createEmptyGrid();
+                this.draw();
+            }
+
+            start() {
+                if (!this.running) {
+                    this.running = true;
+                    this.run();
+                }
+            }
+
+            stop() {
+                this.running = false;
+            }
+
+            run() {
+                if (!this.running) return;
+
+                this.updateGrid();
+                this.draw();
+                setTimeout(() => this.run(), this.interval);
+            }
+        }
+
+        // Инициализация игры
+        window.addEventListener('load', () => {
+            const game = new GameOfLife();
+        });
+    </script>
+</body>
+
+</html>
